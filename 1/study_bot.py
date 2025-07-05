@@ -1,23 +1,29 @@
 import discord
-from discord import app_commands
+from discord import app_commands, Embed, ButtonStyle
 from discord.ext import tasks
-from discord.ui import Button, View
+from discord.ui import View, Button
 from flask import Flask
 from threading import Thread
 from datetime import datetime, timedelta
 from pytz import timezone
 import os, json
 
+# === CẤU HÌNH ===
 TOKEN = os.getenv("DISCORD_TOKEN")
 GUILD_ID = 1388137676900663347
 CHANNEL_ID = 1391086941834838078
 TIMEZONE = timezone("Asia/Ho_Chi_Minh")
 DATA_FILE = "checkin_data.json"
 
+# === FLASK KEEP ALIVE ===
 app = Flask('')
 @app.route('/')
 def home(): return "Bot is running!"
 def keep_alive(): Thread(target=lambda: app.run(host='0.0.0.0', port=8080)).start()
+
+# === TIỆN ÍCH ===
+def get_today():
+    return datetime.now(TIMEZONE).strftime('%Y-%m-%d')
 
 def load_data():
     if not os.path.exists(DATA_FILE): return {}
@@ -26,12 +32,10 @@ def load_data():
 def save_data(data):
     with open(DATA_FILE, 'w') as f: json.dump(data, f, indent=2)
 
-def get_today():
-    return datetime.now(TIMEZONE).strftime('%Y-%m-%d')
-
 def get_members(guild):
     return [m for m in guild.members if not m.bot]
 
+# === KHOI TAO BOT ===
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
@@ -40,6 +44,7 @@ intents.members = True
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
+# === /checkin ===
 @tree.command(name="checkin", description="Điểm danh kèm ảnh (trước 7h)", guild=discord.Object(id=GUILD_ID))
 async def checkin(interaction: discord.Interaction, image: discord.Attachment):
     if interaction.channel.id != CHANNEL_ID:
@@ -63,11 +68,32 @@ async def checkin(interaction: discord.Interaction, image: discord.Attachment):
         data[user_id]["proof"][today] = {"image": image.url, "time": now.strftime('%H:%M')}
         save_data(data)
 
-    await interaction.response.send_message(
-        f"✅ Đã điểm danh {today}!\n📸 Ảnh đã ghi nhận. 💪",
-        ephemeral=False
-    )
+    embed = Embed(title=f"✅ Đã điểm danh {today}!", description="📸 Ảnh đã ghi nhận. 💪")
+    embed.set_image(url=image.url)
+    await interaction.response.send_message(embed=embed, ephemeral=False)
 
+# === /proof ===
+@tree.command(name="proof", description="Xem lại ảnh check-in hôm nay", guild=discord.Object(id=GUILD_ID))
+async def proof(interaction: discord.Interaction):
+    if interaction.channel.id != CHANNEL_ID:
+        await interaction.response.send_message("❌ Lệnh này chỉ dùng trong kênh GM: good morning.", ephemeral=True)
+        return
+
+    user_id = str(interaction.user.id)
+    today = get_today()
+    data = load_data()
+    user_data = data.get(user_id, {})
+    proof = user_data.get("proof", {}).get(today)
+
+    if not proof:
+        await interaction.response.send_message("📭 Bạn chưa điểm danh hôm nay hoặc không có ảnh.", ephemeral=True)
+        return
+
+    embed = Embed(title=f"Ảnh điểm danh hôm nay ({proof['time']})")
+    embed.set_image(url=proof['image'])
+    await interaction.response.send_message(embed=embed, ephemeral=False)
+
+# === /report ===
 @tree.command(name="report", description="Xem báo cáo điểm danh tuần", guild=discord.Object(id=GUILD_ID))
 async def report(interaction: discord.Interaction):
     if interaction.channel.id != CHANNEL_ID:
@@ -103,6 +129,7 @@ async def report(interaction: discord.Interaction):
     else:
         await interaction.response.send_message(f"{header}\n\n" + "\n".join(lines), ephemeral=False)
 
+# === /fine ===
 @tree.command(name="fine", description="Xem và thanh toán tiền phạt", guild=discord.Object(id=GUILD_ID))
 async def fine(interaction: discord.Interaction):
     if interaction.channel.id != CHANNEL_ID:
@@ -124,7 +151,7 @@ async def fine(interaction: discord.Interaction):
     view = None
     if remaining > 0:
         class PayView(View):
-            @discord.ui.button(label="✅ Đã thanh toán thêm 100k", style=discord.ButtonStyle.success)
+            @discord.ui.button(label="✅ Đã thanh toán thêm 100k", style=ButtonStyle.success)
             async def pay(self, i: discord.Interaction, b: Button):
                 if d["paid"] >= d["fine"]:
                     await i.response.send_message("✅ Bạn đã thanh toán đầy đủ rồi!", ephemeral=True)
@@ -149,6 +176,7 @@ async def fine(interaction: discord.Interaction):
 
     await interaction.response.send_message(msg, view=view, ephemeral=False)
 
+# === TỰ ĐỘNG NHẮC VÀ GỬI BÁO CÁO ===
 @tasks.loop(minutes=1)
 async def schedule_tasks():
     now = datetime.now(TIMEZONE)
@@ -174,11 +202,13 @@ async def schedule_tasks():
             def __init__(self, guild): self.guild = guild; self.channel = guild.get_channel(CHANNEL_ID)
         await report(DummyInteraction(client.get_guild(GUILD_ID)))
 
+# === ON READY ===
 @client.event
 async def on_ready():
     await tree.sync(guild=discord.Object(id=GUILD_ID))
     print(f"✅ Bot đã kết nối: {client.user}")
     schedule_tasks.start()
 
+# === CHẠY ===
 keep_alive()
 client.run(TOKEN)
