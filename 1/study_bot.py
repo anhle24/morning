@@ -12,7 +12,7 @@ import os, json
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 GUILD_ID = 1388137676900663347
-CHANNEL_ID = 1391086941834838078  # Bot chỉ hoạt động tại kênh này
+CHANNEL_ID = 1391086941834838078
 TIMEZONE = timezone("Asia/Ho_Chi_Minh")
 DATA_FILE = "checkin_data.json"
 
@@ -31,11 +31,8 @@ def save_data(data):
 def get_today():
     return datetime.now(TIMEZONE).strftime('%Y-%m-%d')
 
-def get_week_range():
-    today = datetime.now(TIMEZONE)
-    monday = today - timedelta(days=today.weekday())
-    sunday = monday + timedelta(days=6)
-    return monday.strftime('%d/%m'), sunday.strftime('%d/%m')
+def get_members(guild):
+    return [m for m in guild.members if not m.bot]
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -44,9 +41,6 @@ intents.members = True
 
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
-
-def get_members(guild):
-    return [m for m in guild.members if not m.bot]
 
 @tree.command(name="checkin", description="Điểm danh kèm ảnh (trước 7h)", guild=discord.Object(id=GUILD_ID))
 async def checkin(interaction: discord.Interaction, image: discord.Attachment):
@@ -70,10 +64,42 @@ async def checkin(interaction: discord.Interaction, image: discord.Attachment):
         data[user_id]["checkins"].append(today)
         data[user_id]["proof"][today] = image.url
         save_data(data)
+
     await interaction.response.send_message(
         f"✅ Đã điểm danh {today}!\n📸 Ảnh đã ghi nhận. 💪",
         ephemeral=False
     )
+
+@tree.command(name="report", description="Xem báo cáo điểm danh tuần", guild=discord.Object(id=GUILD_ID))
+async def report(interaction: discord.Interaction):
+    if interaction.channel.id != CHANNEL_ID:
+        await interaction.response.send_message("❌ Lệnh này chỉ được dùng trong kênh GM: good morning.", ephemeral=True)
+        return
+
+    data = load_data()
+    members = get_members(interaction.guild)
+
+    today = datetime.now(TIMEZONE)
+    monday = today - timedelta(days=today.weekday())
+    sunday = monday + timedelta(days=6)
+    dates = [(monday + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(7)]
+
+    lines = []
+    for m in members:
+        uid = str(m.id)
+        d = data.get(uid, {})
+        count = sum(1 for day in dates if day in d.get("checkins", []))
+        if count < 5:
+            lines.append(f"<@{uid}>: ❌ {count} ngày")
+
+    start = monday.strftime('%d/%m')
+    end = sunday.strftime('%d/%m')
+    header = f"📊 TUẦN ({start} – {end})"
+
+    if not lines:
+        await interaction.response.send_message(f"{header}\n\n✅ Tất cả đều đạt! 🎉", ephemeral=False)
+    else:
+        await interaction.response.send_message(f"{header}\n\n" + "\n".join(lines), ephemeral=False)
 
 @tree.command(name="fine", description="Xem và thanh toán tiền phạt", guild=discord.Object(id=GUILD_ID))
 async def fine(interaction: discord.Interaction):
@@ -84,11 +110,15 @@ async def fine(interaction: discord.Interaction):
     user_id = str(interaction.user.id)
     data = load_data()
     d = data.get(user_id, {"missed_weeks": 0, "fine": 0, "paid": 0})
+    remaining = d["fine"] - d["paid"]
+
     if d["fine"] == 0:
-        await interaction.response.send_message("📄 **PHẠT – <@{}>**\nBạn chưa từng bị phạt. Tiếp tục giữ phong độ nhé! 💪".format(user_id), ephemeral=False)
+        await interaction.response.send_message(
+            f"📄 **PHẠT – <@{user_id}>**\nBạn chưa từng bị phạt. Tiếp tục giữ phong độ nhé! 💪",
+            ephemeral=False
+        )
         return
 
-    remaining = d["fine"] - d["paid"]
     view = None
     if remaining > 0:
         class PayView(View):
@@ -114,33 +144,6 @@ async def fine(interaction: discord.Interaction):
 
     await interaction.response.send_message(msg, view=view, ephemeral=False)
 
-@tree.command(name="report", description="Xem báo cáo điểm danh tuần", guild=discord.Object(id=GUILD_ID))
-async def report(interaction: discord.Interaction):
-    if interaction.channel.id != CHANNEL_ID:
-        await interaction.response.send_message("❌ Lệnh này chỉ được dùng trong kênh GM: good morning.", ephemeral=True)
-        return
-
-    data = load_data()
-    members = get_members(interaction.guild)
-    today = datetime.now(TIMEZONE)
-    monday = today - timedelta(days=today.weekday())
-    dates = [(monday + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(7)]
-    lines, total_fine = [], 0
-    for m in members:
-        uid = str(m.id)
-        d = data.get(uid, {})
-        days = [d.get("checkins", []).count(day) for day in dates]
-        count = sum(1 for day in dates if day in d.get("checkins", []))
-        if count < 5:
-            lines.append(f"<@{uid}>: ❌ {count} ngày → 💸 Phạt 100.000 VNĐ")
-            total_fine += 100000
-        else:
-            lines.append(f"<@{uid}>: ✅ {count} ngày")
-    start, end = get_week_range()
-    header = f"📊 TỔNG KẾT ĐIỂM DANH TUẦN ({start} – {end})"
-    footer = f"\n💰 TỔNG TIỀN PHẠT: {total_fine:,} VNĐ"
-    await interaction.response.send_message(f"{header}\n\n" + "\n".join(lines) + footer, ephemeral=False)
-
 @tasks.loop(minutes=1)
 async def schedule_tasks():
     now = datetime.now(TIMEZONE)
@@ -163,8 +166,7 @@ async def schedule_tasks():
 
     if now.strftime('%A %H:%M') == 'Sunday 20:00':
         class DummyInteraction:
-            def __init__(self, guild): self.guild = guild; self.channel_id = CHANNEL_ID; self.channel = guild.get_channel(CHANNEL_ID)
-            async def response(self): pass
+            def __init__(self, guild): self.guild = guild; self.channel = guild.get_channel(CHANNEL_ID)
         await report(DummyInteraction(client.get_guild(GUILD_ID)))
 
 @client.event
