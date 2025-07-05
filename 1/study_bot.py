@@ -12,7 +12,7 @@ import os, json
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 GUILD_ID = 1388137676900663347
-CHANNEL_ID = 1391086941834838078  # Updated channel ID
+CHANNEL_ID = 1391086941834838078  # Bot chỉ hoạt động tại kênh này
 TIMEZONE = timezone("Asia/Ho_Chi_Minh")
 DATA_FILE = "checkin_data.json"
 
@@ -50,6 +50,10 @@ def get_members(guild):
 
 @tree.command(name="checkin", description="Điểm danh kèm ảnh (trước 7h)", guild=discord.Object(id=GUILD_ID))
 async def checkin(interaction: discord.Interaction, image: discord.Attachment):
+    if interaction.channel_id != CHANNEL_ID:
+        await interaction.response.send_message("❌ Lệnh này chỉ được dùng trong kênh điểm danh quy định.", ephemeral=True)
+        return
+
     now = datetime.now(TIMEZONE)
     if now.hour >= 7:
         await interaction.response.send_message("❌ Đã quá giờ điểm danh hôm nay (sau 7h).", ephemeral=True)
@@ -73,6 +77,10 @@ async def checkin(interaction: discord.Interaction, image: discord.Attachment):
 
 @tree.command(name="fine", description="Xem và thanh toán tiền phạt", guild=discord.Object(id=GUILD_ID))
 async def fine(interaction: discord.Interaction):
+    if interaction.channel_id != CHANNEL_ID:
+        await interaction.response.send_message("❌ Lệnh này chỉ được dùng trong kênh điểm danh quy định.", ephemeral=True)
+        return
+
     user_id = str(interaction.user.id)
     data = load_data()
     d = data.get(user_id, {"missed_weeks": 0, "fine": 0, "paid": 0})
@@ -108,6 +116,10 @@ async def fine(interaction: discord.Interaction):
 
 @tree.command(name="report", description="Xem báo cáo điểm danh tuần", guild=discord.Object(id=GUILD_ID))
 async def report(interaction: discord.Interaction):
+    if interaction.channel_id != CHANNEL_ID:
+        await interaction.response.send_message("❌ Lệnh này chỉ được dùng trong kênh điểm danh quy định.", ephemeral=True)
+        return
+
     data = load_data()
     members = get_members(interaction.guild)
     today = datetime.now(TIMEZONE)
@@ -150,9 +162,8 @@ async def schedule_tasks():
         await channel.send(msg)
 
     if now.strftime('%A %H:%M') == 'Sunday 20:00':
-        # Tự động gửi báo cáo tuần
         class DummyInteraction:
-            def __init__(self, guild): self.guild = guild
+            def __init__(self, guild): self.guild = guild; self.channel_id = CHANNEL_ID
             async def response(self): pass
         await report(DummyInteraction(client.get_guild(GUILD_ID)))
 
