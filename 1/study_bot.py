@@ -50,8 +50,8 @@ def get_members(guild):
 
 @tree.command(name="checkin", description="Điểm danh kèm ảnh (trước 7h)", guild=discord.Object(id=GUILD_ID))
 async def checkin(interaction: discord.Interaction, image: discord.Attachment):
-    if interaction.channel_id != CHANNEL_ID:
-        await interaction.response.send_message("❌ Lệnh này chỉ được dùng trong kênh điểm danh quy định.", ephemeral=True)
+    if interaction.channel.id != CHANNEL_ID:
+        await interaction.response.send_message("❌ Lệnh này chỉ được dùng trong kênh GM: good morning.", ephemeral=True)
         return
 
     now = datetime.now(TIMEZONE)
@@ -77,8 +77,8 @@ async def checkin(interaction: discord.Interaction, image: discord.Attachment):
 
 @tree.command(name="fine", description="Xem và thanh toán tiền phạt", guild=discord.Object(id=GUILD_ID))
 async def fine(interaction: discord.Interaction):
-    if interaction.channel_id != CHANNEL_ID:
-        await interaction.response.send_message("❌ Lệnh này chỉ được dùng trong kênh điểm danh quy định.", ephemeral=True)
+    if interaction.channel.id != CHANNEL_ID:
+        await interaction.response.send_message("❌ Lệnh này chỉ được dùng trong kênh GM: good morning.", ephemeral=True)
         return
 
     user_id = str(interaction.user.id)
@@ -116,8 +116,8 @@ async def fine(interaction: discord.Interaction):
 
 @tree.command(name="report", description="Xem báo cáo điểm danh tuần", guild=discord.Object(id=GUILD_ID))
 async def report(interaction: discord.Interaction):
-    if interaction.channel_id != CHANNEL_ID:
-        await interaction.response.send_message("❌ Lệnh này chỉ được dùng trong kênh điểm danh quy định.", ephemeral=True)
+    if interaction.channel.id != CHANNEL_ID:
+        await interaction.response.send_message("❌ Lệnh này chỉ được dùng trong kênh GM: good morning.", ephemeral=True)
         return
 
     data = load_data()
@@ -163,7 +163,7 @@ async def schedule_tasks():
 
     if now.strftime('%A %H:%M') == 'Sunday 20:00':
         class DummyInteraction:
-            def __init__(self, guild): self.guild = guild; self.channel_id = CHANNEL_ID
+            def __init__(self, guild): self.guild = guild; self.channel_id = CHANNEL_ID; self.channel = guild.get_channel(CHANNEL_ID)
             async def response(self): pass
         await report(DummyInteraction(client.get_guild(GUILD_ID)))
 
