@@ -68,7 +68,7 @@ async def checkin(interaction: discord.Interaction, image: discord.Attachment):
         data[user_id]["proof"][today] = {"image": image.url, "time": now.strftime('%H:%M')}
         save_data(data)
 
-    embed = Embed(title=f"✅ Đã điểm danh {today}!", description="📸 Ảnh đã ghi nhận. 💪")
+    embed = Embed(title=f"✅ Đã điểm danh {today}!", description="📸 Ảnh đã ghi nhận. 💪", color=discord.Color.green())
     embed.set_image(url=image.url)
     await interaction.response.send_message(embed=embed, ephemeral=False)
 
@@ -89,7 +89,7 @@ async def proof(interaction: discord.Interaction):
         await interaction.response.send_message("📭 Bạn chưa điểm danh hôm nay hoặc không có ảnh.", ephemeral=True)
         return
 
-    embed = Embed(title=f"Ảnh điểm danh hôm nay ({proof['time']})")
+    embed = Embed(title=f"Ảnh điểm danh hôm nay ({proof['time']})", color=discord.Color.blue())
     embed.set_image(url=proof['image'])
     await interaction.response.send_message(embed=embed, ephemeral=False)
 
