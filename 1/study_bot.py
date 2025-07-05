@@ -1,5 +1,3 @@
-# attendance_fine_bot.py
-
 import discord
 from discord import app_commands
 from discord.ext import tasks
@@ -62,7 +60,7 @@ async def checkin(interaction: discord.Interaction, image: discord.Attachment):
     data.setdefault(user_id, {"checkins": [], "missed_weeks": 0, "fine": 0, "paid": 0, "proof": {}})
     if today not in data[user_id]["checkins"]:
         data[user_id]["checkins"].append(today)
-        data[user_id]["proof"][today] = image.url
+        data[user_id]["proof"][today] = {"image": image.url, "time": now.strftime('%H:%M')}
         save_data(data)
 
     await interaction.response.send_message(
@@ -87,10 +85,14 @@ async def report(interaction: discord.Interaction):
     lines = []
     for m in members:
         uid = str(m.id)
-        d = data.get(uid, {})
+        d = data.setdefault(uid, {"checkins": [], "missed_weeks": 0, "fine": 0, "paid": 0, "proof": {}})
         count = sum(1 for day in dates if day in d.get("checkins", []))
         if count < 5:
+            d["missed_weeks"] += 1
+            d["fine"] += 100000
             lines.append(f"<@{uid}>: ❌ {count} ngày")
+
+    save_data(data)
 
     start = monday.strftime('%d/%m')
     end = sunday.strftime('%d/%m')
@@ -124,6 +126,9 @@ async def fine(interaction: discord.Interaction):
         class PayView(View):
             @discord.ui.button(label="✅ Đã thanh toán thêm 100k", style=discord.ButtonStyle.success)
             async def pay(self, i: discord.Interaction, b: Button):
+                if d["paid"] >= d["fine"]:
+                    await i.response.send_message("✅ Bạn đã thanh toán đầy đủ rồi!", ephemeral=True)
+                    return
                 d["paid"] += 100000
                 save_data(data)
                 new_remain = d["fine"] - d["paid"]
