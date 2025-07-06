@@ -12,7 +12,7 @@ import os, json, asyncio
 
 # === CONFIG ===
 GUILD_ID = 1388137676900663347
-CHANNEL_ID = 1391086941834838078
+CHANNEL_ID = 1391086941834838078  # Tất cả lệnh hoạt động trong kênh này
 TIMEZONE = timezone("Asia/Ho_Chi_Minh")
 DATA_FILE = "checkin_data.json"
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -164,6 +164,10 @@ async def fine(interaction: discord.Interaction):
 # === /history ===
 @tree.command(name="history", description="Xem lịch sử điểm danh", guild=discord.Object(id=GUILD_ID))
 async def history(interaction: discord.Interaction):
+    if interaction.channel.id != CHANNEL_ID:
+        await interaction.response.send_message("❌ Lệnh này chỉ dùng trong kênh GM: good morning.", ephemeral=True)
+        return
+
     user_id = str(interaction.user.id)
     data = load_data()
     user = data.get(user_id, {})
@@ -192,7 +196,11 @@ async def history(interaction: discord.Interaction):
 
 # === /report ===
 @tree.command(name="report", description="Theo dõi tiến độ hoặc tổng kết tuần", guild=discord.Object(id=GUILD_ID))
-async def report(interaction):
+async def report(interaction: discord.Interaction):
+    if interaction.channel.id != CHANNEL_ID:
+        await interaction.response.send_message("❌ Lệnh này chỉ dùng trong kênh GM: good morning.", ephemeral=True)
+        return
+
     data = load_data()
     members = interaction.guild.members
     today = datetime.now(TIMEZONE)
@@ -239,7 +247,7 @@ async def report(interaction):
 
     await interaction.response.send_message(msg, ephemeral=False)
 
-# === Auto report vào chủ nhật 20:00 ===
+# === Auto report Chủ nhật 20h ===
 async def auto_report_task():
     await client.wait_until_ready()
     channel = client.get_channel(CHANNEL_ID)
@@ -248,7 +256,7 @@ async def auto_report_task():
         now = datetime.now(TIMEZONE)
         if now.weekday() == 6 and now.hour == 20 and now.minute == 0:
             class DummyInteraction:
-                def __init__(self, guild, channel): self.guild = guild; self.channel = channel
+                def __init__(self, guild, channel): self.guild = guild; self.channel = channel; self.channel.id = CHANNEL_ID
                 async def response(self): pass
             try:
                 dummy = DummyInteraction(guild, channel)
