@@ -8,7 +8,7 @@ from flask import Flask
 from threading import Thread
 import aiohttp
 from io import BytesIO
-import os, json
+import os, json, asyncio
 
 # === CONFIG ===
 GUILD_ID = 1388137676900663347
@@ -99,10 +99,7 @@ async def fine(interaction: discord.Interaction):
 
     user_id = str(interaction.user.id)
     data = load_data()
-    user = data.setdefault(user_id, {
-        "checkins": [], "missed_weeks": 0, "fine": 0,
-        "paid": 0, "proof": {}, "weeks_fined": []
-    })
+    user = data.setdefault(user_id, {"checkins": [], "missed_weeks": 0, "fine": 0, "paid": 0, "proof": {}, "weeks_fined": []})
 
     all_checkins = set(user.get("checkins", []))
     weeks_by_key = {}
@@ -160,7 +157,6 @@ async def fine(interaction: discord.Interaction):
                     await btn.response.edit_message(content=new_msg, view=None)
 
         await interaction.response.send_message(msg, view=PayFineView(user_id), ephemeral=False)
-
     else:
         msg += "\n✅ Không còn nợ! 🧾"
         await interaction.response.send_message(msg, ephemeral=False)
@@ -196,11 +192,7 @@ async def history(interaction: discord.Interaction):
 
 # === /report ===
 @tree.command(name="report", description="Theo dõi tiến độ hoặc tổng kết tuần", guild=discord.Object(id=GUILD_ID))
-async def report(interaction: discord.Interaction):
-    if interaction.channel.id != CHANNEL_ID:
-        await interaction.response.send_message("❌ Lệnh này chỉ dùng trong kênh GM: good morning.", ephemeral=True)
-        return
-
+async def report(interaction):
     data = load_data()
     members = interaction.guild.members
     today = datetime.now(TIMEZONE)
@@ -208,7 +200,8 @@ async def report(interaction: discord.Interaction):
     sunday = monday + timedelta(days=6)
     dates = [(monday + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(7)]
     week_key = monday.strftime('%Y-%m-%d')
-    passed, failed, tracking_lines = [], [], []
+    passed, failed = [], []
+    summary_lines = []
 
     for m in members:
         if m.bot: continue
@@ -217,9 +210,7 @@ async def report(interaction: discord.Interaction):
         days_checked = [day for day in dates if day in d["checkins"]]
         count = len(days_checked)
         status = "✅" if count >= 5 else "❌"
-        short_days = ", ".join([datetime.strptime(day, "%Y-%m-%d").strftime("%d/%m") for day in sorted(days_checked)])
-        tracking_lines.append(f"<@{uid}>: {status} {count} ngày – {short_days if short_days else 'Không có điểm danh'}")
-
+        summary_lines.append(f"{status} <@{uid}>: {count}d")
         if count >= 5:
             passed.append(m.mention)
         else:
@@ -233,8 +224,8 @@ async def report(interaction: discord.Interaction):
     week_range = f"{monday.strftime('%d/%m')} – {sunday.strftime('%d/%m')}"
 
     if today.date() <= sunday.date():
-        msg = f"📊 TIẾN ĐỘ TUẦN ({week_range})\n\n" + "\n".join(tracking_lines)
-        msg += "\n\n⏳ Tuần này vẫn đang diễn ra. Hãy cố gắng đạt ít nhất 5 ngày để không bị phạt!"
+        msg = f"📊 TIẾN ĐỘ ({week_range})\n\n" + "\n".join(summary_lines)
+        msg += "\n\n⏳ Cần ≥5d để không bị phạt!"
     else:
         msg = f"📊 TUẦN {week_range}\n\n"
         if passed:
@@ -248,11 +239,31 @@ async def report(interaction: discord.Interaction):
 
     await interaction.response.send_message(msg, ephemeral=False)
 
+# === Auto report vào chủ nhật 20:00 ===
+async def auto_report_task():
+    await client.wait_until_ready()
+    channel = client.get_channel(CHANNEL_ID)
+    guild = discord.utils.get(client.guilds, id=GUILD_ID)
+    while not client.is_closed():
+        now = datetime.now(TIMEZONE)
+        if now.weekday() == 6 and now.hour == 20 and now.minute == 0:
+            class DummyInteraction:
+                def __init__(self, guild, channel): self.guild = guild; self.channel = channel
+                async def response(self): pass
+            try:
+                dummy = DummyInteraction(guild, channel)
+                await report(dummy)
+            except Exception as e:
+                print("Tự động gửi báo cáo lỗi:", e)
+            await asyncio.sleep(60)
+        await asyncio.sleep(20)
+
 # === ON READY ===
 @client.event
 async def on_ready():
     await tree.sync(guild=discord.Object(id=GUILD_ID))
     print(f"✅ Bot sẵn sàng – {client.user}")
+    client.loop.create_task(auto_report_task())
 
 # === START ===
 keep_alive()
