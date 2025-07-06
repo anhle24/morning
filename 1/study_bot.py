@@ -79,7 +79,7 @@ async def checkin(interaction: discord.Interaction, image: discord.Attachment):
     embed.set_image(url=image.url)
     await interaction.response.send_message(embed=embed, ephemeral=False)
 
-# === /history (không giới hạn ngày) ===
+# === /history ===
 @tree.command(name="history", description="Xem toàn bộ lịch sử điểm danh", guild=discord.Object(id=GUILD_ID))
 async def history(interaction: discord.Interaction):
     if interaction.channel.id != CHANNEL_ID:
@@ -184,6 +184,9 @@ async def fine(interaction: discord.Interaction):
         class PayView(View):
             @discord.ui.button(label="✅ Đã thanh toán thêm 100k", style=ButtonStyle.success)
             async def pay(self, i: discord.Interaction, b: Button):
+                if i.user.id != interaction.user.id:
+                    await i.response.send_message("❌ Bạn không thể thanh toán thay người khác!", ephemeral=True)
+                    return
                 if d["paid"] >= d["fine"]:
                     await i.response.send_message("✅ Bạn đã thanh toán đầy đủ rồi!", ephemeral=True)
                     return
