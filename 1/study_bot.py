@@ -22,8 +22,11 @@ def home(): return "Bot is running!"
 def keep_alive(): Thread(target=lambda: app.run(host='0.0.0.0', port=8080)).start()
 
 # === TIỆN ÍCH ===
-def get_today():
+def get_today_key():
     return datetime.now(TIMEZONE).strftime('%Y-%m-%d')
+
+def get_today_display():
+    return datetime.now(TIMEZONE).strftime('%d/%m/%Y')
 
 def load_data():
     if not os.path.exists(DATA_FILE): return {}
@@ -35,7 +38,7 @@ def save_data(data):
 def get_members(guild):
     return [m for m in guild.members if not m.bot]
 
-# === KHOI TAO BOT ===
+# === KHỞI TẠO BOT ===
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
@@ -60,38 +63,66 @@ async def checkin(interaction: discord.Interaction, image: discord.Attachment):
         return
 
     user_id = str(interaction.user.id)
-    today = get_today()
+    today = get_today_key()
     data = load_data()
     data.setdefault(user_id, {"checkins": [], "missed_weeks": 0, "fine": 0, "paid": 0, "proof": {}})
-    if today not in data[user_id]["checkins"]:
-        data[user_id]["checkins"].append(today)
-        data[user_id]["proof"][today] = {"image": image.url, "time": now.strftime('%H:%M')}
-        save_data(data)
 
-    embed = Embed(title=f"✅ Đã điểm danh {today}!", description="📸 Ảnh đã ghi nhận. 💪", color=discord.Color.green())
+    if today in data[user_id]["checkins"]:
+        await interaction.response.send_message("❌ Bạn đã điểm danh hôm nay rồi. Không thể điểm danh lần nữa.", ephemeral=True)
+        return
+
+    data[user_id]["checkins"].append(today)
+    data[user_id]["proof"][today] = {"image": image.url, "time": now.strftime('%H:%M')}
+    save_data(data)
+
+    embed = Embed(title=f"✅ Đã điểm danh ngày {get_today_display()}!", color=discord.Color.green())
     embed.set_image(url=image.url)
     await interaction.response.send_message(embed=embed, ephemeral=False)
 
-# === /proof ===
-@tree.command(name="proof", description="Xem lại ảnh check-in hôm nay", guild=discord.Object(id=GUILD_ID))
-async def proof(interaction: discord.Interaction):
+# === /history (không giới hạn ngày) ===
+@tree.command(name="history", description="Xem toàn bộ lịch sử điểm danh", guild=discord.Object(id=GUILD_ID))
+async def history(interaction: discord.Interaction):
     if interaction.channel.id != CHANNEL_ID:
-        await interaction.response.send_message("❌ Lệnh này chỉ dùng trong kênh GM: good morning.", ephemeral=True)
+        await interaction.response.send_message("❌ Lệnh này chỉ được dùng trong kênh GM: good morning.", ephemeral=True)
         return
 
     user_id = str(interaction.user.id)
-    today = get_today()
     data = load_data()
     user_data = data.get(user_id, {})
-    proof = user_data.get("proof", {}).get(today)
+    checkins = set(user_data.get("checkins", []))
+    proof = user_data.get("proof", {})
 
-    if not proof:
-        await interaction.response.send_message("📭 Bạn chưa điểm danh hôm nay hoặc không có ảnh.", ephemeral=True)
+    if not checkins:
+        await interaction.response.send_message("📭 Bạn chưa có dữ liệu điểm danh nào.", ephemeral=True)
         return
 
-    embed = Embed(title=f"Ảnh điểm danh hôm nay ({proof['time']})", color=discord.Color.blue())
-    embed.set_image(url=proof['image'])
-    await interaction.response.send_message(embed=embed, ephemeral=False)
+    first_day = min(datetime.strptime(d, "%Y-%m-%d") for d in checkins)
+    today = datetime.now(TIMEZONE)
+
+    lines = []
+    current = first_day
+    while current <= today:
+        key = current.strftime('%Y-%m-%d')
+        label = current.strftime('%d/%m/%Y')
+        if key in checkins and key in proof:
+            lines.append(f"📅 {label} – ✅ lúc {proof[key]['time']}")
+        else:
+            lines.append(f"📅 {label} – ❌")
+        current += timedelta(days=1)
+
+    msg = f"🕓 LỊCH SỬ ĐIỂM DANH – <@{user_id}>\n\n"
+    chunks = []
+    temp = msg
+    for line in lines:
+        if len(temp) + len(line) + 1 >= 1900:
+            chunks.append(temp)
+            temp = ""
+        temp += line + "\n"
+    if temp:
+        chunks.append(temp)
+
+    for chunk in chunks:
+        await interaction.followup.send(chunk, ephemeral=False) if interaction.response.is_done() else await interaction.response.send_message(chunk, ephemeral=False)
 
 # === /report ===
 @tree.command(name="report", description="Xem báo cáo điểm danh tuần", guild=discord.Object(id=GUILD_ID))
@@ -185,7 +216,7 @@ async def schedule_tasks():
         channel = guild.get_channel(CHANNEL_ID)
         members = get_members(guild)
         data = load_data()
-        today = get_today()
+        today = get_today_key()
         missed = []
         for m in members:
             uid = str(m.id)
