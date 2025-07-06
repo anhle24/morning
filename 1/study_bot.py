@@ -99,7 +99,10 @@ async def fine(interaction: discord.Interaction):
 
     user_id = str(interaction.user.id)
     data = load_data()
-    user = data.setdefault(user_id, {"checkins": [], "missed_weeks": 0, "fine": 0, "paid": 0, "proof": {}, "weeks_fined": []})
+    user = data.setdefault(user_id, {
+        "checkins": [], "missed_weeks": 0, "fine": 0,
+        "paid": 0, "proof": {}, "weeks_fined": []
+    })
 
     all_checkins = set(user.get("checkins", []))
     weeks_by_key = {}
@@ -108,7 +111,12 @@ async def fine(interaction: discord.Interaction):
         weeks_by_key.setdefault(week_key, []).append(date_str)
 
     for wk in sorted(weeks_by_key.keys()):
-        if wk in user["weeks_fined"]: continue
+        if wk in user["weeks_fined"]:
+            continue
+        monday = datetime.strptime(wk, "%Y-%m-%d")
+        sunday = monday + timedelta(days=6)
+        if datetime.now(TIMEZONE).date() <= sunday.date():
+            continue  # chưa hết tuần
         if len(weeks_by_key[wk]) < 5:
             user["weeks_fined"].append(wk)
             user["missed_weeks"] += 1
