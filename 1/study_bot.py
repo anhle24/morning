@@ -1,6 +1,6 @@
 import discord
 from discord import app_commands
-from discord.ext import commands, tasks
+from discord.ext import commands
 from discord.ui import View, Button
 from datetime import datetime, timedelta
 from pytz import timezone
@@ -116,7 +116,7 @@ async def fine(interaction: discord.Interaction):
         monday = datetime.strptime(wk, "%Y-%m-%d")
         sunday = monday + timedelta(days=6)
         if datetime.now(TIMEZONE).date() <= sunday.date():
-            continue  # chưa hết tuần
+            continue
         if len(weeks_by_key[wk]) < 5:
             user["weeks_fined"].append(wk)
             user["missed_weeks"] += 1
@@ -195,7 +195,7 @@ async def history(interaction: discord.Interaction):
     await interaction.response.send_message(msg, ephemeral=False)
 
 # === /report ===
-@tree.command(name="report", description="Báo cáo tổng kết tuần", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="report", description="Theo dõi tiến độ hoặc tổng kết tuần", guild=discord.Object(id=GUILD_ID))
 async def report(interaction: discord.Interaction):
     if interaction.channel.id != CHANNEL_ID:
         await interaction.response.send_message("❌ Lệnh này chỉ dùng trong kênh GM: good morning.", ephemeral=True)
@@ -208,34 +208,44 @@ async def report(interaction: discord.Interaction):
     sunday = monday + timedelta(days=6)
     dates = [(monday + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(7)]
     week_key = monday.strftime('%Y-%m-%d')
-    passed, failed = [], []
+    passed, failed, tracking_lines = [], [], []
 
     for m in members:
         if m.bot: continue
         uid = str(m.id)
         d = data.setdefault(uid, {"checkins": [], "missed_weeks": 0, "fine": 0, "paid": 0, "proof": {}, "weeks_fined": []})
-        count = sum(1 for day in dates if day in d["checkins"])
+        days_checked = [day for day in dates if day in d["checkins"]]
+        count = len(days_checked)
+        status = "✅" if count >= 5 else "❌"
+        short_days = ", ".join([datetime.strptime(day, "%Y-%m-%d").strftime("%d/%m") for day in sorted(days_checked)])
+        tracking_lines.append(f"<@{uid}>: {status} {count} ngày – {short_days if short_days else 'Không có điểm danh'}")
+
         if count >= 5:
             passed.append(m.mention)
         else:
             failed.append(m.mention)
-            if week_key not in d["weeks_fined"]:
+            if today.date() > sunday.date() and week_key not in d["weeks_fined"]:
                 d["missed_weeks"] += 1
                 d["fine"] += 100_000
                 d["weeks_fined"].append(week_key)
 
     save_data(data)
-    start = monday.strftime('%d/%m')
-    end = sunday.strftime('%d/%m')
-    msg = f"📊 TUẦN {start} – {end}\n\n"
-    if passed:
-        msg += f"✅ {', '.join(passed)}\n"
-    if failed:
-        msg += f"❌ {', '.join(failed)}\n"
-    if passed and not failed:
-        msg += "🎉 Tất cả mọi người đều đạt! Tuyệt vời! 💪"
-    elif failed and not passed:
-        msg += "🚫 Tuần này không ai đạt."
+    week_range = f"{monday.strftime('%d/%m')} – {sunday.strftime('%d/%m')}"
+
+    if today.date() <= sunday.date():
+        msg = f"📊 TIẾN ĐỘ TUẦN ({week_range})\n\n" + "\n".join(tracking_lines)
+        msg += "\n\n⏳ Tuần này vẫn đang diễn ra. Hãy cố gắng đạt ít nhất 5 ngày để không bị phạt!"
+    else:
+        msg = f"📊 TUẦN {week_range}\n\n"
+        if passed:
+            msg += f"✅ {', '.join(passed)}\n"
+        if failed:
+            msg += f"❌ {', '.join(failed)}\n"
+        if passed and not failed:
+            msg += "🎉 Tất cả mọi người đều đạt! Tuyệt vời! 💪"
+        elif failed and not passed:
+            msg += "🚫 Tuần này không ai đạt."
+
     await interaction.response.send_message(msg, ephemeral=False)
 
 # === ON READY ===
