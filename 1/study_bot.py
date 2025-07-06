@@ -101,7 +101,7 @@ async def report(interaction: discord.Interaction):
     today = datetime.now(TIMEZONE).date()
     monday = today - timedelta(days=today.weekday())
     week_key = monday.strftime('%Y-%m-%d')
-    week_range = f"{monday.strftime('%d/%m')} – {(monday + timedelta(days=6)).strftime('%d/%m')}"
+    week_range = f"{monday.strftime('%d/%m')} – {(monday + timedelta(days=6)).strftime('%d/%m') }"
     members = interaction.guild.members
 
     passed, failed = [], []
@@ -124,11 +124,41 @@ async def report(interaction: discord.Interaction):
         msg += f"✅ {', '.join(passed)}\n"
     if failed:
         msg += f"❌ {', '.join(failed)}\n"
-    if passed and not failed:
-        msg += "🎉 Tất cả mọi người đều đạt! Tuyệt vời! 💪"
-    elif failed and not passed:
-        msg += "🚫 Tuần này không ai đạt."
+    msg += "\n⏳ Cần ≥5d để không bị phạt!"
 
+    await interaction.response.send_message(msg, ephemeral=False)
+
+# === /history ===
+@tree.command(name="history", description="Xem lịch sử điểm danh", guild=discord.Object(id=GUILD_ID))
+async def history(interaction: discord.Interaction):
+    if interaction.channel.id != CHANNEL_ID:
+        await interaction.response.send_message("❌ Lệnh này chỉ dùng trong kênh GM.", ephemeral=True)
+        return
+
+    user_id = str(interaction.user.id)
+    data = load_data()
+    user = data.get(user_id, {})
+    checkins = set(user.get("checkins", []))
+    proof = user.get("proof", {})
+
+    if not checkins:
+        await interaction.response.send_message(f"📜 LỊCH SỬ – <@{user_id}>\n\nBạn chưa có lịch sử điểm danh nào.", ephemeral=False)
+        return
+
+    first_day = min(datetime.strptime(day, "%Y-%m-%d") for day in checkins)
+    today = datetime.now(TIMEZONE)
+    lines = []
+    current = first_day
+    while current <= today:
+        key = current.strftime('%Y-%m-%d')
+        label = current.strftime('%d/%m/%Y')
+        if key in checkins and key in proof:
+            lines.append(f"📅 {label} – ✅ lúc {proof[key]['time']}")
+        else:
+            lines.append(f"📅 {label} – ❌")
+        current += timedelta(days=1)
+
+    msg = f"📜 LỊCH SỬ – <@{user_id}>\n\n" + "\n".join(lines)
     await interaction.response.send_message(msg, ephemeral=False)
 
 # === /fine ===
@@ -179,45 +209,12 @@ async def fine(interaction: discord.Interaction):
         msg += "\n✅ Không còn nợ! 🧾"
         await interaction.response.send_message(msg, ephemeral=False)
 
-# === /history ===
-@tree.command(name="history", description="Xem lịch sử điểm danh", guild=discord.Object(id=GUILD_ID))
-async def history(interaction: discord.Interaction):
-    if interaction.channel.id != CHANNEL_ID:
-        await interaction.response.send_message("❌ Lệnh này chỉ dùng trong kênh GM.", ephemeral=True)
-        return
-
-    user_id = str(interaction.user.id)
-    data = load_data()
-    user = data.get(user_id, {})
-    checkins = set(user.get("checkins", []))
-    proof = user.get("proof", {})
-
-    if not checkins:
-        await interaction.response.send_message(f"📜 LỊCH SỬ – <@{user_id}>\n\nBạn chưa có lịch sử điểm danh nào.", ephemeral=False)
-        return
-
-    first_day = min(datetime.strptime(day, "%Y-%m-%d") for day in checkins)
-    today = datetime.now(TIMEZONE)
-    lines = []
-    current = first_day
-    while current <= today:
-        key = current.strftime('%Y-%m-%d')
-        label = current.strftime('%d/%m/%Y')
-        if key in checkins and key in proof:
-            lines.append(f"📅 {label} – ✅ lúc {proof[key]['time']}")
-        else:
-            lines.append(f"📅 {label} – ❌")
-        current += timedelta(days=1)
-
-    msg = f"📜 LỊCH SỬ – <@{user_id}>\n\n" + "\n".join(lines)
-    await interaction.response.send_message(msg, ephemeral=False)
-
-# === TỰ ĐỘNG GỬI REPORT & PHẠT lúc 23:20 Chủ nhật
+# === AUTO REPORT 20H CHỦ NHẬT ===
 async def auto_report_task():
     await client.wait_until_ready()
     while not client.is_closed():
         now = datetime.now(TIMEZONE)
-        if now.weekday() == 6 and now.hour == 23 and now.minute == 20:
+        if now.weekday() == 6 and now.hour == 20 and now.minute == 0:
             data = load_data()
             today = now.date()
             monday = today - timedelta(days=today.weekday())
@@ -261,7 +258,7 @@ async def auto_report_task():
             await asyncio.sleep(60)
         await asyncio.sleep(20)
 
-# === READY ===
+# === ON READY ===
 @client.event
 async def on_ready():
     await tree.sync(guild=discord.Object(id=GUILD_ID))
