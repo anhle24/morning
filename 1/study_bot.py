@@ -138,7 +138,7 @@ async def report(interaction: discord.Interaction):
     if passed and not failed:
         msg += "🎉 Tất cả mọi người đều đạt! Tuyệt vời! 💪"
     elif failed and not passed:
-        msg += "😢 Tuần này không ai đạt cả. Cố gắng lại nhé!"
+        msg += "🚫 Tuần này không ai đạt."
     await interaction.response.send_message(msg, ephemeral=False)
 
 @tree.command(name="fine", description="Xem và thanh toán tiền phạt", guild=discord.Object(id=GUILD_ID))
