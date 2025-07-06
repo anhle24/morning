@@ -27,7 +27,7 @@ def get_today_display():
 
 def load_data():
     if not os.path.exists(DATA_FILE): return {}
-    with open(DATA_FILE, 'r') as f: return json.load(f)
+    with open(DATA_FILE, ' 'r') as f: return json.load(f)
 
 def save_data(data):
     with open(DATA_FILE, 'w') as f: json.dump(data, f, indent=2)
@@ -118,6 +118,7 @@ async def report(interaction: discord.Interaction):
     monday = today - timedelta(days=today.weekday())
     sunday = monday + timedelta(days=6)
     dates = [(monday + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(7)]
+    week_key = monday.strftime('%Y-%m-%d')
     passed = []
     failed = []
     for m in members:
@@ -128,6 +129,11 @@ async def report(interaction: discord.Interaction):
             passed.append(m.mention)
         else:
             failed.append(m.mention)
+            if week_key not in d["weeks_fined"]:
+                d["missed_weeks"] += 1
+                d["fine"] += 100000
+                d["weeks_fined"].append(week_key)
+    save_data(data)
     start = monday.strftime('%d/%m')
     end = sunday.strftime('%d/%m')
     msg = f"📊 TUẦN {start} – {end}\n\n"
@@ -150,6 +156,10 @@ async def fine(interaction: discord.Interaction):
     data = load_data()
     user = data.setdefault(user_id, {"checkins": [], "missed_weeks": 0, "fine": 0, "paid": 0, "proof": {}, "weeks_fined": []})
     remaining = user["fine"] - user["paid"]
+    if user["missed_weeks"] == 0 and user["fine"] == 0:
+        msg = f"📄 PHẠT – <@{user_id}>\nBạn chưa từng bị phạt. Tiếp tục giữ phong độ nhé! 💪"
+        await interaction.response.send_message(msg, ephemeral=False)
+        return
     view = None
     if remaining > 0:
         class PayView(View):
@@ -198,7 +208,6 @@ async def schedule_tasks():
         else:
             msg = f"📢 KẾT THÚC – {now.strftime('%A (%d/%m/%Y)')}\n✅ Mọi người đã điểm danh đúng giờ! 🔥"
         await channel.send(msg)
-
     if now.strftime('%A %H:%M') == 'Sunday 20:00':
         class DummyInteraction:
             def __init__(self, guild): self.guild = guild; self.channel = guild.get_channel(CHANNEL_ID)
