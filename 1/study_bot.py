@@ -16,8 +16,11 @@ DATA_FILE = "checkin_data.json"
 
 app = Flask('')
 @app.route('/')
-def home(): return "Bot is running!"
-def keep_alive(): Thread(target=lambda: app.run(host='0.0.0.0', port=8080)).start()
+def home():
+    return "Bot is running!"
+
+def keep_alive():
+    Thread(target=lambda: app.run(host='0.0.0.0', port=8080)).start()
 
 def get_today_key():
     return datetime.now(TIMEZONE).strftime('%Y-%m-%d')
@@ -26,11 +29,14 @@ def get_today_display():
     return datetime.now(TIMEZONE).strftime('%d/%m/%Y')
 
 def load_data():
-    if not os.path.exists(DATA_FILE): return {}
-    with open(DATA_FILE, ' 'r') as f: return json.load(f)
+    if not os.path.exists(DATA_FILE):
+        return {}
+    with open(DATA_FILE, 'r') as f:
+        return json.load(f)
 
 def save_data(data):
-    with open(DATA_FILE, 'w') as f: json.dump(data, f, indent=2)
+    with open(DATA_FILE, 'w') as f:
+        json.dump(data, f, indent=2)
 
 def get_members(guild):
     return [m for m in guild.members if not m.bot]
