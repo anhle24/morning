@@ -12,7 +12,7 @@ import os, json, asyncio
 
 # === CONFIG ===
 GUILD_ID = 1388137676900663347
-CHANNEL_ID = 1391086941834838078  # Tất cả lệnh hoạt động trong kênh này
+CHANNEL_ID = 1391086941834838078
 TIMEZONE = timezone("Asia/Ho_Chi_Minh")
 DATA_FILE = "checkin_data.json"
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -52,16 +52,13 @@ def get_week_range(week_key):
     return f"({start.strftime('%d/%m/%Y')} – {end.strftime('%d/%m/%Y')})"
 
 # === /checkin ===
-@tree.command(name="checkin", description="Điểm danh kèm ảnh (trước 7h)", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="checkin", description="Điểm danh kèm ảnh", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(image="Ảnh minh chứng")
 async def checkin(interaction: discord.Interaction, image: discord.Attachment):
     if interaction.channel.id != CHANNEL_ID:
-        await interaction.response.send_message("❌ Lệnh này chỉ dùng trong kênh GM: good morning.", ephemeral=True)
+        await interaction.response.send_message("❌ Lệnh này chỉ dùng trong kênh GM.", ephemeral=True)
         return
     now = datetime.now(TIMEZONE)
-    if now.hour >= 7:
-        await interaction.response.send_message("❌ Đã quá giờ điểm danh hôm nay (sau 7h).", ephemeral=True)
-        return
     if not image.content_type.startswith("image"):
         await interaction.response.send_message("❌ Thiếu ảnh. Không được điểm danh.", ephemeral=True)
         return
@@ -69,7 +66,10 @@ async def checkin(interaction: discord.Interaction, image: discord.Attachment):
     user_id = str(interaction.user.id)
     today = get_today()
     data = load_data()
-    user = data.setdefault(user_id, {"checkins": [], "missed_weeks": 0, "fine": 0, "paid": 0, "proof": {}, "weeks_fined": []})
+    user = data.setdefault(user_id, {
+        "checkins": [], "missed_weeks": 0, "fine": 0, "paid": 0,
+        "proof": {}, "weeks": {}
+    })
 
     if today in user["checkins"]:
         await interaction.response.send_message("❌ Bạn đã điểm danh hôm nay rồi.", ephemeral=True)
@@ -90,49 +90,67 @@ async def checkin(interaction: discord.Interaction, image: discord.Attachment):
                     ephemeral=False
                 )
 
+# === /report ===
+@tree.command(name="report", description="Tổng kết tuần (thủ công, không phạt)", guild=discord.Object(id=GUILD_ID))
+async def report(interaction: discord.Interaction):
+    if interaction.channel.id != CHANNEL_ID:
+        await interaction.response.send_message("❌ Lệnh này chỉ dùng trong kênh GM.", ephemeral=True)
+        return
+
+    data = load_data()
+    today = datetime.now(TIMEZONE).date()
+    monday = today - timedelta(days=today.weekday())
+    week_key = monday.strftime('%Y-%m-%d')
+    week_range = f"{monday.strftime('%d/%m')} – {(monday + timedelta(days=6)).strftime('%d/%m')}"
+    members = interaction.guild.members
+
+    passed, failed = [], []
+    for m in members:
+        if m.bot: continue
+        uid = str(m.id)
+        user = data.setdefault(uid, {
+            "checkins": [], "missed_weeks": 0, "fine": 0, "paid": 0,
+            "proof": {}, "weeks": {}
+        })
+        week_days = [(monday + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(7)]
+        count = len([d for d in week_days if d in user["checkins"]])
+        if count >= 5:
+            passed.append(m.mention)
+        else:
+            failed.append(m.mention)
+
+    msg = f"📊 TIẾN ĐỘ TUẦN {week_range}\n\n"
+    if passed:
+        msg += f"✅ {', '.join(passed)}\n"
+    if failed:
+        msg += f"❌ {', '.join(failed)}\n"
+    if passed and not failed:
+        msg += "🎉 Tất cả mọi người đều đạt! Tuyệt vời! 💪"
+    elif failed and not passed:
+        msg += "🚫 Tuần này không ai đạt."
+
+    await interaction.response.send_message(msg, ephemeral=False)
+
 # === /fine ===
 @tree.command(name="fine", description="Xem và thanh toán tiền phạt", guild=discord.Object(id=GUILD_ID))
 async def fine(interaction: discord.Interaction):
     if interaction.channel.id != CHANNEL_ID:
-        await interaction.response.send_message("❌ Lệnh này chỉ dùng trong kênh GM: good morning.", ephemeral=True)
+        await interaction.response.send_message("❌ Lệnh này chỉ dùng trong kênh GM.", ephemeral=True)
         return
 
     user_id = str(interaction.user.id)
     data = load_data()
-    user = data.setdefault(user_id, {"checkins": [], "missed_weeks": 0, "fine": 0, "paid": 0, "proof": {}, "weeks_fined": []})
+    user = data.setdefault(user_id, {
+        "checkins": [], "missed_weeks": 0, "fine": 0, "paid": 0,
+        "proof": {}, "weeks": {}
+    })
+    debt = user["fine"] - user["paid"]
 
-    all_checkins = set(user.get("checkins", []))
-    weeks_by_key = {}
-    for date_str in all_checkins:
-        week_key = get_monday_key(date_str)
-        weeks_by_key.setdefault(week_key, []).append(date_str)
-
-    for wk in sorted(weeks_by_key.keys()):
-        if wk in user["weeks_fined"]:
-            continue
-        monday = datetime.strptime(wk, "%Y-%m-%d")
-        sunday = monday + timedelta(days=6)
-        if datetime.now(TIMEZONE).date() <= sunday.date():
-            continue
-        if len(weeks_by_key[wk]) < 5:
-            user["weeks_fined"].append(wk)
-            user["missed_weeks"] += 1
-            user["fine"] += 100_000
-
-    save_data(data)
-
-    total = user["fine"]
-    paid = user["paid"]
-    debt = total - paid
-
-    if total == 0:
-        await interaction.response.send_message(
-            f"🥳 <@{user_id}> chưa từng bị phạt tuần nào! Giữ vững phong độ nhé! 💪",
-            ephemeral=False
-        )
+    if user["fine"] == 0:
+        await interaction.response.send_message(f"🥳 <@{user_id}> chưa từng bị phạt tuần nào! Giữ vững phong độ nhé! 💪", ephemeral=False)
         return
 
-    msg = f"📄 PHẠT – <@{user_id}>\n\n- Tuần không đạt: {user['missed_weeks']}\n- Tổng phạt: {total:,} VNĐ\n- Đã trả: {paid:,} VNĐ\n"
+    msg = f"📄 PHẠT – <@{user_id}>\n\n- Tuần không đạt: {user['missed_weeks']}\n- Tổng phạt: {user['fine']:,} VNĐ\n- Đã trả: {user['paid']:,} VNĐ\n"
     if debt > 0:
         msg += f"- Còn lại: {debt:,} VNĐ"
 
@@ -165,7 +183,7 @@ async def fine(interaction: discord.Interaction):
 @tree.command(name="history", description="Xem lịch sử điểm danh", guild=discord.Object(id=GUILD_ID))
 async def history(interaction: discord.Interaction):
     if interaction.channel.id != CHANNEL_ID:
-        await interaction.response.send_message("❌ Lệnh này chỉ dùng trong kênh GM: good morning.", ephemeral=True)
+        await interaction.response.send_message("❌ Lệnh này chỉ dùng trong kênh GM.", ephemeral=True)
         return
 
     user_id = str(interaction.user.id)
@@ -194,83 +212,60 @@ async def history(interaction: discord.Interaction):
     msg = f"📜 LỊCH SỬ – <@{user_id}>\n\n" + "\n".join(lines)
     await interaction.response.send_message(msg, ephemeral=False)
 
-# === /report ===
-@tree.command(name="report", description="Theo dõi tiến độ hoặc tổng kết tuần", guild=discord.Object(id=GUILD_ID))
-async def report(interaction: discord.Interaction):
-    if interaction.channel.id != CHANNEL_ID:
-        await interaction.response.send_message("❌ Lệnh này chỉ dùng trong kênh GM: good morning.", ephemeral=True)
-        return
-
-    data = load_data()
-    members = interaction.guild.members
-    today = datetime.now(TIMEZONE)
-    monday = today - timedelta(days=today.weekday())
-    sunday = monday + timedelta(days=6)
-    dates = [(monday + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(7)]
-    week_key = monday.strftime('%Y-%m-%d')
-    passed, failed = [], []
-    summary_lines = []
-
-    for m in members:
-        if m.bot: continue
-        uid = str(m.id)
-        d = data.setdefault(uid, {"checkins": [], "missed_weeks": 0, "fine": 0, "paid": 0, "proof": {}, "weeks_fined": []})
-        days_checked = [day for day in dates if day in d["checkins"]]
-        count = len(days_checked)
-        status = "✅" if count >= 5 else "❌"
-        summary_lines.append(f"{status} <@{uid}>: {count}d")
-        if count >= 5:
-            passed.append(m.mention)
-        else:
-            failed.append(m.mention)
-            if today.date() > sunday.date() and week_key not in d["weeks_fined"]:
-                d["missed_weeks"] += 1
-                d["fine"] += 100_000
-                d["weeks_fined"].append(week_key)
-
-    save_data(data)
-    week_range = f"{monday.strftime('%d/%m')} – {sunday.strftime('%d/%m')}"
-
-    if today.date() <= sunday.date():
-        msg = f"📊 TIẾN ĐỘ ({week_range})\n\n" + "\n".join(summary_lines)
-        msg += "\n\n⏳ Cần ≥5d để không bị phạt!"
-    else:
-        msg = f"📊 TUẦN {week_range}\n\n"
-        if passed:
-            msg += f"✅ {', '.join(passed)}\n"
-        if failed:
-            msg += f"❌ {', '.join(failed)}\n"
-        if passed and not failed:
-            msg += "🎉 Tất cả mọi người đều đạt! Tuyệt vời! 💪"
-        elif failed and not passed:
-            msg += "🚫 Tuần này không ai đạt."
-
-    await interaction.response.send_message(msg, ephemeral=False)
-
-# === Auto report Chủ nhật 20h ===
+# === TỰ ĐỘNG GỬI REPORT & PHẠT lúc 23:20 Chủ nhật
 async def auto_report_task():
     await client.wait_until_ready()
-    channel = client.get_channel(CHANNEL_ID)
-    guild = discord.utils.get(client.guilds, id=GUILD_ID)
     while not client.is_closed():
         now = datetime.now(TIMEZONE)
-        if now.weekday() == 6 and now.hour == 20 and now.minute == 0:
-            class DummyInteraction:
-                def __init__(self, guild, channel): self.guild = guild; self.channel = channel; self.channel.id = CHANNEL_ID
-                async def response(self): pass
-            try:
-                dummy = DummyInteraction(guild, channel)
-                await report(dummy)
-            except Exception as e:
-                print("Tự động gửi báo cáo lỗi:", e)
+        if now.weekday() == 6 and now.hour == 23 and now.minute == 20:
+            data = load_data()
+            today = now.date()
+            monday = today - timedelta(days=today.weekday())
+            week_key = monday.strftime('%Y-%m-%d')
+            channel = client.get_channel(CHANNEL_ID)
+            guild = discord.utils.get(client.guilds, id=GUILD_ID)
+            members = guild.members
+
+            passed, failed = [], []
+            for m in members:
+                if m.bot: continue
+                uid = str(m.id)
+                user = data.setdefault(uid, {
+                    "checkins": [], "missed_weeks": 0, "fine": 0, "paid": 0,
+                    "proof": {}, "weeks": {}
+                })
+                week_days = [(monday + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(7)]
+                count = len([d for d in week_days if d in user["checkins"]])
+                if count >= 5:
+                    passed.append(m.mention)
+                    user["weeks"][week_key] = {"reported": True, "status": "pass"}
+                else:
+                    failed.append(m.mention)
+                    user["weeks"][week_key] = {"reported": True, "status": "fail"}
+                    user["missed_weeks"] += 1
+                    user["fine"] += 100_000
+            save_data(data)
+
+            week_range = f"{monday.strftime('%d/%m')} – {(monday + timedelta(days=6)).strftime('%d/%m')}"
+            msg = f"📊 TUẦN {week_range}\n\n"
+            if passed:
+                msg += f"✅ {', '.join(passed)}\n"
+            if failed:
+                msg += f"❌ {', '.join(failed)}\n"
+            if passed and not failed:
+                msg += "🎉 Tất cả mọi người đều đạt! Tuyệt vời! 💪"
+            elif failed and not passed:
+                msg += "🚫 Tuần này không ai đạt."
+
+            await channel.send(msg)
             await asyncio.sleep(60)
         await asyncio.sleep(20)
 
-# === ON READY ===
+# === READY ===
 @client.event
 async def on_ready():
     await tree.sync(guild=discord.Object(id=GUILD_ID))
-    print(f"✅ Bot sẵn sàng – {client.user}")
+    print(f"✅ Bot đã sẵn sàng: {client.user}")
     client.loop.create_task(auto_report_task())
 
 # === START ===
