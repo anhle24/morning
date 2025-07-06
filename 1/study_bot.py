@@ -25,10 +25,6 @@ def get_today_key():
 def get_today_display():
     return datetime.now(TIMEZONE).strftime('%d/%m/%Y')
 
-def get_week_key(dt):
-    monday = dt - timedelta(days=dt.weekday())
-    return monday.strftime('%Y-%m-%d')
-
 def load_data():
     if not os.path.exists(DATA_FILE): return {}
     with open(DATA_FILE, 'r') as f: return json.load(f)
@@ -134,7 +130,15 @@ async def report(interaction: discord.Interaction):
             failed.append(m.mention)
     start = monday.strftime('%d/%m')
     end = sunday.strftime('%d/%m')
-    msg = f"📊 TUẦN {start} – {end}\n\n✅ {', '.join(passed) if passed else 'Không ai'}\n❌ {', '.join(failed) if failed else 'Không ai'}"
+    msg = f"📊 TUẦN {start} – {end}\n\n"
+    if passed:
+        msg += f"✅ {', '.join(passed)}\n"
+    if failed:
+        msg += f"❌ {', '.join(failed)}\n"
+    if passed and not failed:
+        msg += "🎉 Tất cả mọi người đều đạt! Tuyệt vời! 💪"
+    elif failed and not passed:
+        msg += "😢 Tuần này không ai đạt cả. Cố gắng lại nhé!"
     await interaction.response.send_message(msg, ephemeral=False)
 
 @tree.command(name="fine", description="Xem và thanh toán tiền phạt", guild=discord.Object(id=GUILD_ID))
@@ -145,26 +149,6 @@ async def fine(interaction: discord.Interaction):
     user_id = str(interaction.user.id)
     data = load_data()
     user = data.setdefault(user_id, {"checkins": [], "missed_weeks": 0, "fine": 0, "paid": 0, "proof": {}, "weeks_fined": []})
-    checkins = set(user.get("checkins", []))
-    fined_weeks = set(user.get("weeks_fined", []))
-    all_dates = [datetime.strptime(d, "%Y-%m-%d") for d in checkins]
-    if not all_dates:
-        await interaction.response.send_message("📭 Bạn chưa có dữ liệu điểm danh nào.", ephemeral=True)
-        return
-    min_date = min(all_dates)
-    today = datetime.now(TIMEZONE)
-    monday = min_date - timedelta(days=min_date.weekday())
-    while monday <= today:
-        week_key = monday.strftime('%Y-%m-%d')
-        if week_key not in fined_weeks:
-            days = [(monday + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(7)]
-            count = sum(1 for d in days if d in checkins)
-            if count < 5:
-                user["missed_weeks"] += 1
-                user["fine"] += 100000
-                user["weeks_fined"].append(week_key)
-        monday += timedelta(days=7)
-    save_data(data)
     remaining = user["fine"] - user["paid"]
     view = None
     if remaining > 0:
