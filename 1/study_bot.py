@@ -52,13 +52,18 @@ def get_week_range(week_key):
     return f"({start.strftime('%d/%m/%Y')} – {end.strftime('%d/%m/%Y')})"
 
 # === /checkin ===
-@tree.command(name="checkin", description="Điểm danh kèm ảnh", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="checkin", description="Điểm danh kèm ảnh (trước 7h)", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(image="Ảnh minh chứng")
 async def checkin(interaction: discord.Interaction, image: discord.Attachment):
     if interaction.channel.id != CHANNEL_ID:
         await interaction.response.send_message("❌ Lệnh này chỉ dùng trong kênh GM.", ephemeral=True)
         return
+
     now = datetime.now(TIMEZONE)
+    if now.hour >= 7:
+        await interaction.response.send_message("❌ Đã quá giờ điểm danh hôm nay.", ephemeral=True)
+        return
+
     if not image.content_type.startswith("image"):
         await interaction.response.send_message("❌ Thiếu ảnh. Không được điểm danh.", ephemeral=True)
         return
@@ -209,6 +214,36 @@ async def fine(interaction: discord.Interaction):
         msg += "\n✅ Không còn nợ! 🧾"
         await interaction.response.send_message(msg, ephemeral=False)
 
+# === DAILY 7AM REMINDER ===
+async def daily_7h_check():
+    await client.wait_until_ready()
+    while not client.is_closed():
+        now = datetime.now(TIMEZONE)
+        if now.hour == 7 and now.minute == 0:
+            data = load_data()
+            today = get_today()
+            channel = client.get_channel(CHANNEL_ID)
+            guild = discord.utils.get(client.guilds, id=GUILD_ID)
+            members = guild.members
+
+            missing = []
+            for m in members:
+                if m.bot: continue
+                uid = str(m.id)
+                udata = data.get(uid, {})
+                if today not in udata.get("checkins", []):
+                    missing.append(m.mention)
+
+            if not missing:
+                await channel.send("✅ Tất cả đã điểm danh trước 7h sáng. Tuyệt vời! 💪")
+            else:
+                msg = "📢 7h rồi – Chưa điểm danh:\n\n"
+                msg += "\n".join([f"❌ {m}" for m in missing])
+                await channel.send(msg)
+
+            await asyncio.sleep(60)
+        await asyncio.sleep(20)
+
 # === AUTO REPORT 20H CHỦ NHẬT ===
 async def auto_report_task():
     await client.wait_until_ready()
@@ -264,6 +299,7 @@ async def on_ready():
     await tree.sync(guild=discord.Object(id=GUILD_ID))
     print(f"✅ Bot đã sẵn sàng: {client.user}")
     client.loop.create_task(auto_report_task())
+    client.loop.create_task(daily_7h_check())
 
 # === START ===
 keep_alive()
